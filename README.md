@@ -39,8 +39,8 @@ At any point during this process, anyone can come along and destroy your plant, 
 
 - What do I need?
 
-  - [es_extended](https://github.com/ESX-Org/es_extended)
-  - [mysql-async](https://github.com/brouznouf/fivem-mysql-async)
+  - [es_extended](https://github.com/esx-framework/esx_core)
+  - [oxmysql](https://github.com/overextended/oxmysql)
   - Already existing ways to obtain seeds and sell the weed you harvest.
   - The items you want to use for seeds and harvested weed *already in your database!*
 
@@ -49,7 +49,7 @@ At any point during this process, anyone can come along and destroy your plant, 
     1. Clone this repository.
     2. Make sure the directory it creates is called `esx_uteknark`.
     3. Move the files into your `resources/` directory.
-    4. Add `ensure esx_uteknark` to your `server.cfg`.
+    4. Make sure `es_extended` and `oxmysql` are started before this resource, then add `ensure esx_uteknark` to your `server.cfg`.
     5. Import [esx_uteknark.sql](esx_uteknark.sql) into your database.
     6. Modify [the configuration](config.lua) to suit your needs. Pay special attention to the `Items`!
     7. Either `refresh` and `start esx_uteknark` or restart your server.
@@ -77,7 +77,7 @@ At any point during this process, anyone can come along and destroy your plant, 
 
 - What do I do if I'm having trouble with the resource?
 
-    Please post any problems/bug reports on the [esx_uteknark issues](https://github.com/DemmyDemon/esx_uteknark/issues) page on GitHub. Kindly check if the issue is already listed first. For general support in making it work right on your server, post in the release thread on the FiveM forum. Thread will be linked here once the release is live there.
+    Please post any problems/bug reports on the [esx_uteknark issues](https://github.com/moshquit0/esx_uteknark/issues) page on GitHub. Kindly check if the issue is already listed first. For general support in making it work right on your server, post in the release thread on the FiveM forum. Thread will be linked here once the release is live there.
     
     **DO NOT** look me up on Discord for support. I do not provide chat-based support for this resource, and will simply block you on there.
 
