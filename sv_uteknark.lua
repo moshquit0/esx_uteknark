@@ -1,5 +1,12 @@
-local ESX = nil
-local oneSyncEnabled = GetConvar('onesync_enabled', false)
+-- ESX Legacy: imports.lua provides ESX globally, but we keep a local reference for clarity.
+local ESX = exports['es_extended']:getSharedObject()
+
+-- GetConvar returns strings; normalise to a boolean.
+-- FXServer has used both `onesync_enabled` and `onesync` across versions/config styles.
+local oneSyncEnabled = (
+    GetConvar('onesync_enabled', 'false') == 'true'
+    or GetConvar('onesync', 'off') ~= 'off'
+)
 local VERBOSE = false
 local lastPlant = {}
 local tickTimes = {}
@@ -59,39 +66,62 @@ function HasItem(who, what, count)
     end
 end
 
-local function TakeItem(who, what, count)
-  local xPlayer = ESX.GetPlayerFromId(who)
-  if not xPlayer then return false end
-
-  local item = xPlayer.getInventoryItem(what)
-  if not item or (item.count or 0) < count then
-    return false
-  end
-
-  xPlayer.removeInventoryItem(what, count)
-  return true
+function TakeItem(who, what, count)
+    count = count or 1
+    if ESX == nil then
+        log("TakeItem: No ESX Object!")
+        return false
+    end
+    local xPlayer = ESX.GetPlayerFromId(who)
+    if xPlayer == nil then
+        log("TakeItem: Failed to resolve xPlayer from", who)
+        return false
+    end
+    local itemspec =  xPlayer.getInventoryItem(what)
+    if itemspec then
+        if itemspec.count >= count then
+            xPlayer.removeInventoryItem(what, count)
+            return true
+        else
+            return false
+        end
+    else
+        log("TakeItem: Failed to get item data for item", what)
+        return false
+    end
 end
 
-local function GiveItem(who, what, count)
-  local xPlayer = ESX.GetPlayerFromId(who)
-  if not xPlayer then
-    return false
-  end
-
-  if xPlayer.canCarryItem and not xPlayer.canCarryItem(what, count) then
-    return false
-  end
-
-  if not xPlayer.canCarryItem then
-    local item = xPlayer.getInventoryItem(what)
-    if not item then return false end
-    if item.limit and item.limit ~= -1 and (item.count + count) > item.limit then
-      return false
+function GiveItem(who, what, count)
+    count = count or 1
+    if ESX == nil then
+        log("GiveItem: No ESX Object!")
+        return false
     end
-  end
+    local xPlayer = ESX.GetPlayerFromId(who)
+    if xPlayer == nil then
+        log("GiveItem: Failed to resolve xPlayer from", who)
+        return false
+    end
+    -- ESX Legacy / modern inventory: prefer canCarryItem when available.
+    if xPlayer.canCarryItem and not xPlayer.canCarryItem(what, count) then
+        return false
+    end
 
-  xPlayer.addInventoryItem(what, count)
-  return true
+    -- Backwards-compatible fallback for very old inventories.
+    local itemspec = xPlayer.getInventoryItem(what)
+    if not itemspec then
+        log("GiveItem: Failed to get item data for item", what)
+        return false
+    end
+
+    if (not xPlayer.canCarryItem) then
+        if itemspec.limit and itemspec.limit ~= -1 and (itemspec.count + count) > itemspec.limit then
+            return false
+        end
+    end
+
+    xPlayer.addInventoryItem(what, count)
+    return true
 end
 
 function makeToast(target, subject, message)
@@ -206,57 +236,61 @@ function keyCount(tbl)
 end
 
 Citizen.CreateThread(function()
-    local ESXTries = 60
-    local itemsLoaded = false
-    while not itemsLoaded and ESXTries > 0 do
-            if keyCount(ESX.Items) > 0 then
-                itemsLoaded = true
-                for forWhat,itemName in pairs(Config.Items) do
-                    if ESX.Items[itemName] then
-                        log(forWhat,'item in configuration ('..itemName..') found in ESX: Good!')
-                    else
-                        log('WARNING:',forWhat,'item in cofiguration ('..itemName..') does not exist!')
-                    end
-                end
-                ESX.RegisterUsableItem(Config.Items.Seed, function(source)
-                    local now = os.time()
-                    local last = lastPlant[source] or 0
-                    if now > last + (Config.ActionTime/1000) then
-                        if HasItem(source, Config.Items.Seed) then
-                            TriggerClientEvent('esx_uteknark:attempt_plant', source)
-                            lastPlant[source] = now
-                        else
-                            makeToast(source, _U('planting_text'), _U('planting_no_seed'))
-                        end
-                    else
-                        makeToast(source, _U('planting_text'), _U('planting_too_fast'))
-                    end
-                end)
-            end
+    local tries = 60
+    while (not ESX or not ESX.Items or keyCount(ESX.Items) == 0) and tries > 0 do
         Citizen.Wait(1000)
-        ESXTries = ESXTries - 1
+        tries = tries - 1
     end
+
     if not ESX then
         log("CRITICAL ERROR: Could not obtain ESX object!\n")
+        return
     end
+
+    -- Validate configured items
+    if ESX.Items then
+        for forWhat, itemName in pairs(Config.Items) do
+            if ESX.Items[itemName] then
+                log(forWhat, 'item in configuration ('..itemName..') found in ESX: Good!')
+            else
+                log('WARNING:', forWhat, 'item in configuration ('..itemName..') does not exist!')
+            end
+        end
+    end
+
+    ESX.RegisterUsableItem(Config.Items.Seed, function(source)
+        local now = os.time()
+        local last = lastPlant[source] or 0
+        if now > last + (Config.ActionTime / 1000) then
+            if HasItem(source, Config.Items.Seed) then
+                TriggerClientEvent('esx_uteknark:attempt_plant', source)
+                lastPlant[source] = now
+            else
+                makeToast(source, _U('planting_text'), _U('planting_no_seed'))
+            end
+        else
+            makeToast(source, _U('planting_text'), _U('planting_too_fast'))
+        end
+    end)
 end)
 
 Citizen.CreateThread(function()
     local databaseReady = false
+
+    -- oxmysql: wait until the DB connection is ready.
+    MySQL.ready(function()
+        cropstate:load(function(plantCount)
+            if plantCount == 1 then
+                log('Uteknark loaded a single plant!')
+            else
+                log('Uteknark loaded',plantCount,'plants')
+            end
+        end)
+        databaseReady = true
+    end)
+
     while not databaseReady do
-        Citizen.Wait(500)
-        local state = GetResourceState('mysql-async')
-        if state == "started" then
-            Citizen.Wait(500)
-            cropstate:load(function(plantCount)
-                if plantCount == 1 then
-                    log('Uteknark loaded a single plant!')
-                else
-                    log('Uteknark loaded',plantCount,'plants')
-                end
-            end)
-            databaseReady = true
-        end
+        Citizen.Wait(100)
     end
 
     while true do
