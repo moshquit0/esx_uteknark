@@ -224,8 +224,6 @@ Citizen.CreateThread(function()
     local ESXTries = 60
     local itemsLoaded = false
     while not itemsLoaded and ESXTries > 0 do
-        TriggerEvent('esx:getSharedObject', function(obj)
-            ESX = obj
             if keyCount(ESX.Items) > 0 then
                 itemsLoaded = true
                 for forWhat,itemName in pairs(Config.Items) do
@@ -250,7 +248,6 @@ Citizen.CreateThread(function()
                     end
                 end)
             end
-        end)
         Citizen.Wait(1000)
         ESXTries = ESXTries - 1
     end
