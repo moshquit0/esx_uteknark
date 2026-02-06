@@ -59,54 +59,39 @@ function HasItem(who, what, count)
     end
 end
 
-function TakeItem(who, what, count)
-    count = count or 1
-    if ESX == nil then
-        log("TakeItem: No ESX Object!")
-        return false
-    end
-    local xPlayer = ESX.GetPlayerFromId(who)
-    if xPlayer == nil then
-        log("TakeItem: Failed to resolve xPlayer from", who)
-        return false
-    end
-    local itemspec =  xPlayer.getInventoryItem(what)
-    if itemspec then
-        if itemspec.count >= count then
-            xPlayer.removeInventoryItem(what, count)
-            return true
-        else
-            return false
-        end
-    else
-        log("TakeItem: Failed to get item data for item", what)
-        return false
-    end
+local function TakeItem(who, what, count)
+  local xPlayer = ESX.GetPlayerFromId(who)
+  if not xPlayer then return false end
+
+  local item = xPlayer.getInventoryItem(what)
+  if not item or (item.count or 0) < count then
+    return false
+  end
+
+  xPlayer.removeInventoryItem(what, count)
+  return true
 end
 
-function GiveItem(who, what, count)
-    count = count or 1
-    if ESX == nil then
-        log("GiveItem: No ESX Object!")
-        return false
+local function GiveItem(who, what, count)
+  local xPlayer = ESX.GetPlayerFromId(who)
+  if not xPlayer then
+    return false
+  end
+
+  if xPlayer.canCarryItem and not xPlayer.canCarryItem(what, count) then
+    return false
+  end
+
+  if not xPlayer.canCarryItem then
+    local item = xPlayer.getInventoryItem(what)
+    if not item then return false end
+    if item.limit and item.limit ~= -1 and (item.count + count) > item.limit then
+      return false
     end
-    local xPlayer = ESX.GetPlayerFromId(who)
-    if xPlayer == nil then
-        log("GiveItem: Failed to resolve xPlayer from", who)
-        return false
-    end
-    local itemspec =  xPlayer.getInventoryItem(what)
-    if itemspec then
-        if not itemspec.limit or itemspec.limit == -1 or itemspec.count + count <= itemspec.limit then
-            xPlayer.addInventoryItem(what, count)
-            return true
-        else
-            return false
-        end
-    else
-        log("GiveItem: Failed to get item data for item", what)
-        return false
-    end
+  end
+
+  xPlayer.addInventoryItem(what, count)
+  return true
 end
 
 function makeToast(target, subject, message)
