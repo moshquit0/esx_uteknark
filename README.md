@@ -19,7 +19,7 @@ When you have your spot, use the seed item in your inventory. You will get feedb
 
 Shortly after planting, your little sapling will need some tending. It depends on soil quality, but it's within a couple of minutes.
 
-When the sapling has been tended, it will need some time to grow, and then it will need tending again. If you fail to tend your plant, it will die. What is needed for the tending process can be different from server to server, but by default you don't need anything.
+When the sapling has been tended, it will need some time to grow, and then it will need tending again. If you fail to tend your plant, it will die. What is needed for the tending process can be different from server to server. In this fork, tending uses the fertilizer item configured as `Config.Items.Tend` (default: `dunger`). Set it to `nil` to disable the requirement.
 
 Once the plant has reached the very last stage (Stage 6 by default), it will be ready to harvest. How much weed you get, and how many seeds, is entirely up to the server you play on.
 
@@ -29,37 +29,56 @@ At any point during this process, anyone can come along and destroy your plant, 
 
 - Why the weird name? 
 
-  It's Swedish. Ute means "outside" and Knark means "drugs" - You're growing your drugs outside. Hey, it's better than the alternative! It could have been called `esx_ormbunke`!
+  It's Swedish. Ute means "outside" and Knark means "drugs" - You're growing your drugs outside.
+
 
 - What do I need?
 
-  - [es_extended](https://github.com/esx-framework/esx_core)
-  - [oxmysql](https://github.com/overextended/oxmysql)
-  - Already existing ways to obtain seeds and sell the weed you harvest.
-  - The items you want to use for seeds and harvested weed *already in your database!*
+  - One of:
+    - [es_extended](https://github.com/esx-framework/esx_core) (ESX)
+    - [qb-core](https://github.com/qbcore-framework/qb-core) (QBCore)
+    - Standalone (no framework) - uses a command to plant seeds
+    - [oxmysql](https://github.com/overextended/oxmysql)
+    - Already existing ways to obtain seeds and sell the weed you harvest.
+    - The items you want to use for seeds, fertilizer (tending) and harvested weed.
 
 - How do I install it?
 
     1. Clone this repository.
-    2. Make sure the directory it creates is called `esx_uteknark`.
+    2. Make sure the directory it creates is called `mosh_uteknark`.
     3. Move the files into your `resources/` directory.
-    4. Make sure `es_extended` and `oxmysql` are started before this resource, then add `ensure esx_uteknark` to your `server.cfg`.
-    5. Import [esx_uteknark.sql](esx_uteknark.sql) into your database.
-    6. Modify [the configuration](config.lua) to suit your needs. Pay special attention to the `Items`!
-    7. Either `refresh` and `start esx_uteknark` or restart your server.
+    4. Make sure your chosen framework (ESX/QB) and `oxmysql` are started before this resource, then add `ensure mosh_uteknark` to your `server.cfg`.
+    5. Import [mosh_uteknark.sql](mosh_uteknark.sql) into your database.
+    6. Modify [the configuration](config.lua) to suit your needs. Pay special attention to `Framework`, `Inventory` and `Items`.
+    7. Either `refresh` and `start mosh_uteknark` or restart your server.
 
-- Ugh. ESX. Why?
 
-    It's simply the most common framework. Besides, I ported this script over from my Paradise framework at the request of some friends, and the server they play on is ESX based. Not a huge fan of ESX myself, but it gets the job done.
+- Item definitions
+
+  You must add the used items to your framework/inventory. Ready-to-paste snippets are included:
+
+  - ESX: `items/esx_items.sql` (pick weight-based or limit-based section)
+  - QBCore: `items/qb_items.lua` (add to `qb-core/shared/items.lua`)
+  - ox_inventory: `items/ox_inventory_items.lua` (add to `ox_inventory/data/items.lua`)
+
+
+
+- Standalone note
+
+  If you run the resource without a framework, set `Config.Framework = 'standalone'`.
+  In that mode, planting is done via the command defined in `Config.Standalone.PlantCommand` (default: `/moshseed`).
+
+- Why multi-framework?
+
+  This fork adds a small bridge layer so the same resource can run on ESX, QBCore, or in standalone mode.
 
 - Will you release a VRP version?
 
-    No. I have never used VRP, have no experience with it and have neither the time, nor the inclanation to do so.
+    No.
 
-- Can I modify and release the script with some other framework support?
+- Can I modify and release the script?
 
-    Check out [the license](LICENSE). The short version is "Yep."  
-    I prefixed UteKnark with ESX in the resource name specifically to distinguish it from any and all versions that might be derived for other frameworks, and request that any derivative works follows this pattern, such as `vrp_uteknark` or `limbo_uteknark`.
+  Check out [the license](LICENSE). The short version is: yes. If you publish a fork, please use a distinct resource name to avoid conflicts.
 
 - Where can I plant weed?
 
@@ -71,7 +90,7 @@ At any point during this process, anyone can come along and destroy your plant, 
 
 - What do I do if I'm having trouble with the resource?
 
-    Please post any problems/bug reports on the [esx_uteknark issues](https://github.com/moshquit0/esx_uteknark/issues) page on GitHub. Kindly check if the issue is already listed first. For general support in making it work right on your server, post in the release thread on the FiveM forum. Thread will be linked here once the release is live there.
+    Please post any problems/bug reports on the [mosh_uteknark issues](https://github.com/moshquit0/mosh_uteknark/issues) page on GitHub. Kindly check if the issue is already listed first.
     
     **DO NOT** look me up on Discord for support. I do not provide chat-based support for this resource, and will simply block you on there.
 
@@ -79,7 +98,7 @@ At any point during this process, anyone can come along and destroy your plant, 
 
     The script is made to be as configurable as possible. That means the details can be quite different between the defaults and the server you play on. See [the config](config.lua) for the default values.
 
-# Thanks to
+# Thanks to DemmyDemon/esx_uteknark and:
 
 - Tails for putting up with my obsessive coding into the night.
 - Degen for the encouragement and feedback.
