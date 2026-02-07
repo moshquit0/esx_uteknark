@@ -1,9 +1,10 @@
 local onServer = IsDuplicityVersion()
+local DB_TABLE = (Config and Config.Database and Config.Database.Table) or "mosh_uteknark"
 local cropstateMethods = {
     plant = function(instance, location, soil, stage)
         if onServer then
             stage = stage or 1
-            MySQL.Async.insert("INSERT INTO `uteknark` (`x`, `y`, `z`, `soil`, `stage`) VALUES (@x, @y, @z, @soil, @stage);",
+            MySQL.Async.insert(string.format("INSERT INTO `%s` (`x`, `y`, `z`, `soil`, `stage`) VALUES (@x, @y, @z, @soil, @stage);", DB_TABLE),
             {
                 ['@x'] = location.x,
                 ['@y'] = location.y,
@@ -13,7 +14,7 @@ local cropstateMethods = {
             },
             function(id)
                 instance:import(id, location, stage, os.time(), soil)
-                TriggerClientEvent('esx_uteknark:planted',-1, id, location, stage)
+                TriggerClientEvent('mosh_uteknark:planted',-1, id, location, stage)
                 verbose('Plant',id,'was planted.')
             end)
         else
@@ -23,7 +24,7 @@ local cropstateMethods = {
     load = function(instance, callback)
         if onServer then
             verbose('Loading...')
-            MySQL.Async.fetchAll("SELECT `id`, `stage`, UNIX_TIMESTAMP(`time`) AS `time`, `x`, `y`, `z`, `soil` FROM `uteknark`;", 
+            MySQL.Async.fetchAll(string.format("SELECT `id`, `stage`, UNIX_TIMESTAMP(`time`) AS `time`, `x`, `y`, `z`, `soil` FROM `%s`;", DB_TABLE),
             {},
             function(rows)
                 Citizen.CreateThread(function()
@@ -45,7 +46,7 @@ local cropstateMethods = {
     import = function(instance, id, location, stage, time, soil)
         local success, object = instance.octree:insert(location, 0.01, {id=id, stage=stage, time=time, soil=soil})
         if not success then
-            Citizen.Trace(string.format("Uteknark failed to import plant with ID %i into octree\n", id))
+            Citizen.Trace(string.format("mosh_uteknark failed to import plant with ID %i into octree\n", id))
         end
         instance.index[id] = object
     end,
@@ -54,12 +55,12 @@ local cropstateMethods = {
         plant.data.stage = stage
         if onServer then
             plant.data.time = os.time()
-            MySQL.Async.execute("UPDATE `uteknark` SET `stage` = @stage WHERE `id` = @id LIMIT 1;",
+            MySQL.Async.execute(string.format("UPDATE `%s` SET `stage` = @stage WHERE `id` = @id LIMIT 1;", DB_TABLE),
             {
                 ['@id'] = id,
                 ['@stage'] = stage,
             }, function(_)
-                TriggerClientEvent('esx_uteknark:update', -1, id, stage)
+                TriggerClientEvent('mosh_uteknark:update', -1, id, stage)
                 verbose('Set plant',id,'to stage',stage)
             end)
         elseif plant.data.object then
@@ -83,12 +84,12 @@ local cropstateMethods = {
         end
         instance.index[id] = nil
         if onServer then
-            MySQL.Async.execute("DELETE FROM `uteknark` WHERE `id` = @id LIMIT 1;",
+            MySQL.Async.execute(string.format("DELETE FROM `%s` WHERE `id` = @id LIMIT 1;", DB_TABLE),
             { ['@id'] = id },
             function()
-                TriggerClientEvent('esx_uteknark:removePlant', -1, id)
+                TriggerClientEvent('mosh_uteknark:removePlant', -1, id)
                 if withPyro then
-                    TriggerClientEvent('esx_uteknark:pyromaniac', -1, location)
+                    TriggerClientEvent('mosh_uteknark:pyromaniac', -1, location)
                 end
                 verbose('Removed plant',id)
             end)
@@ -114,9 +115,9 @@ local cropstateMethods = {
                     table.insert(forest, {id=id, location=plant.bounds.location, stage=plant.data.stage})
                 end
             end
-            TriggerClientEvent('esx_uteknark:bulk_data', target, forest)
+            TriggerClientEvent('mosh_uteknark:bulk_data', target, forest)
         else
-            TriggerServerEvent('esx_uteknark:request_data')
+            TriggerServerEvent('mosh_uteknark:request_data')
         end
     end,
 }
@@ -142,13 +143,13 @@ cropstate = {
 setmetatable(cropstate,cropstateMeta)
 
 if onServer then
-    RegisterNetEvent('esx_uteknark:request_data')
-    AddEventHandler ('esx_uteknark:request_data', function()
+    RegisterNetEvent('mosh_uteknark:request_data')
+    AddEventHandler ('mosh_uteknark:request_data', function()
         cropstate:bulkData(source)
     end)
     
-    RegisterNetEvent('esx_uteknark:remove')
-    AddEventHandler ('esx_uteknark:remove', function(plantID, nearLocation)
+    RegisterNetEvent('mosh_uteknark:remove')
+    AddEventHandler ('mosh_uteknark:remove', function(plantID, nearLocation)
         local src = source
         local plant = cropstate.index[plantID]
         if plant then
@@ -163,12 +164,12 @@ if onServer then
             end
         else
             Citizen.Trace(GetPlayerName(src)..' ('..src..') tried to remove plant '..plantID..': That plant does not exist!\n')
-            TriggerClientEvent('esx_uteknark:remove', src, plantID)
+            TriggerClientEvent('mosh_uteknark:remove', src, plantID)
         end
     end)
 
-    RegisterNetEvent('esx_uteknark:frob')
-    AddEventHandler ('esx_uteknark:frob', function(plantID, nearLocation)
+    RegisterNetEvent('mosh_uteknark:frob')
+    AddEventHandler ('mosh_uteknark:frob', function(plantID, nearLocation)
         local src = source
         local plant = cropstate.index[plantID]
         if plant then
@@ -214,26 +215,26 @@ if onServer then
     end)
 
 else
-    RegisterNetEvent('esx_uteknark:bulk_data')
-    AddEventHandler ('esx_uteknark:bulk_data', function(forest)
+    RegisterNetEvent('mosh_uteknark:bulk_data')
+    AddEventHandler ('mosh_uteknark:bulk_data', function(forest)
         for i, plant in ipairs(forest) do
             cropstate:import(plant.id, plant.location, plant.stage)
         end
         cropstate.loaded = true
     end)
 
-    RegisterNetEvent('esx_uteknark:planted')
-    AddEventHandler ('esx_uteknark:planted', function(id, location, stage)
+    RegisterNetEvent('mosh_uteknark:planted')
+    AddEventHandler ('mosh_uteknark:planted', function(id, location, stage)
         cropstate:import(id, location, stage)
     end)
     
-    RegisterNetEvent('esx_uteknark:update')
-    AddEventHandler ('esx_uteknark:update', function(plantID, stage)
+    RegisterNetEvent('mosh_uteknark:update')
+    AddEventHandler ('mosh_uteknark:update', function(plantID, stage)
         cropstate:update(plantID, stage)
     end)
 
-    RegisterNetEvent('esx_uteknark:removePlant')
-    AddEventHandler ('esx_uteknark:removePlant', function(plantID)
+    RegisterNetEvent('mosh_uteknark:removePlant')
+    AddEventHandler ('mosh_uteknark:removePlant', function(plantID)
         cropstate:remove(plantID)
     end)
 end
