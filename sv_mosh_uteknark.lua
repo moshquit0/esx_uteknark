@@ -1,5 +1,94 @@
--- ESX Legacy: imports.lua provides ESX globally, but we keep a local reference for clarity.
-local ESX = exports['es_extended']:getSharedObject()
+-- Multi-framework bridge (ESX / QB / Standalone)
+--
+-- This resource was originally written for ESX; this wrapper keeps the logic intact
+-- while swapping player/inventory calls depending on the selected framework.
+
+local Framework = {
+    name = 'standalone',
+    core = nil,
+    inventory = 'none', -- 'framework' | 'ox' | 'none'
+    ox = nil,
+    ready = false,
+}
+
+local function isStarted(resName)
+    local state = GetResourceState(resName)
+    return state == 'started' or state == 'starting'
+end
+
+local function detectFramework()
+    local fw = (Config and Config.Framework) or 'auto'
+    fw = string.lower(fw)
+    if fw == 'auto' then
+        if isStarted('es_extended') then
+            fw = 'esx'
+        elseif isStarted('qb-core') then
+            fw = 'qb'
+        else
+            fw = 'standalone'
+        end
+    end
+    return fw
+end
+
+local function initFramework()
+    Framework.name = detectFramework()
+
+    if Framework.name == 'esx' then
+        local tries = 200
+        while not isStarted('es_extended') and tries > 0 do
+            Citizen.Wait(250)
+            tries = tries - 1
+        end
+        if not isStarted('es_extended') then
+            log('ERROR: Config.Framework is ESX, but es_extended is not started!')
+        else
+            Framework.core = exports['es_extended']:getSharedObject()
+        end
+    elseif Framework.name == 'qb' then
+        local tries = 200
+        while not isStarted('qb-core') and tries > 0 do
+            Citizen.Wait(250)
+            tries = tries - 1
+        end
+        if not isStarted('qb-core') then
+            log('ERROR: Config.Framework is QB, but qb-core is not started!')
+        else
+            local ok, obj = pcall(function()
+                return exports['qb-core']:GetCoreObject({'Functions', 'Shared'})
+            end)
+            if ok and obj then
+                Framework.core = obj
+            else
+                Framework.core = exports['qb-core']:GetCoreObject()
+            end
+        end
+    end
+
+    local inv = (Config and Config.Inventory) or 'auto'
+    inv = string.lower(inv)
+
+    -- Default inventory selection
+    if inv == 'auto' then
+        if Framework.name == 'standalone' then
+            inv = isStarted('ox_inventory') and 'ox' or 'none'
+        else
+            inv = 'framework'
+        end
+    end
+
+    if inv == 'ox' and isStarted('ox_inventory') then
+        Framework.inventory = 'ox'
+        Framework.ox = exports.ox_inventory
+    elseif inv == 'framework' then
+        Framework.inventory = 'framework'
+    else
+        Framework.inventory = 'none'
+    end
+
+    Framework.ready = true
+    log('Framework:', Framework.name, '| Inventory:', Framework.inventory)
+end
 
 -- GetConvar returns strings; normalise to a boolean.
 -- FXServer has used both `onesync_enabled` and `onesync` across versions/config styles.
@@ -11,7 +100,7 @@ local VERBOSE = false
 local lastPlant = {}
 local tickTimes = {}
 local tickPlantCount = 0
-local VERSION = '1.1.4'
+local VERSION = '1.2.0-mosh'
 
 AddEventHandler('playerDropped',function(why)
     lastPlant[source] = nil
@@ -44,88 +133,108 @@ end
 
 function HasItem(who, what, count)
     count = count or 1
-    if ESX == nil then
-        log("HasItem: No ESX Object!")
-        return false
+    if not what then return true end
+    if Framework.inventory == 'ox' and Framework.ox then
+        return (Framework.ox:Search(who, 'count', what) or 0) >= count
     end
-    local xPlayer = ESX.GetPlayerFromId(who)
-    if xPlayer == nil then
-        log("HasItem: Failed to resolve xPlayer from", who)
-        return false
+    if Framework.inventory ~= 'framework' then
+        return true
     end
-    local itemspec =  xPlayer.getInventoryItem(what)
-    if itemspec then
-        if itemspec.count >= count then
-            return true
-        else
-            return false
-        end
-    else
-        log("HasItem: Failed to get item data for item", what)
-        return false
+    if Framework.name == 'esx' and Framework.core then
+        local xPlayer = Framework.core.GetPlayerFromId(who)
+        if not xPlayer then return false end
+        local itemspec = xPlayer.getInventoryItem(what)
+        return (itemspec and itemspec.count or 0) >= count
     end
+    if Framework.name == 'qb' and Framework.core then
+        local Player = Framework.core.Functions.GetPlayer(who)
+        if not Player then return false end
+        local item = Player.Functions.GetItemByName(what)
+        local amount = item and (item.amount or item.count or 0) or 0
+        return amount >= count
+    end
+    return false
 end
 
 function TakeItem(who, what, count)
     count = count or 1
-    if ESX == nil then
-        log("TakeItem: No ESX Object!")
-        return false
+    if not what then return true end
+    if Framework.inventory == 'ox' and Framework.ox then
+        local success = Framework.ox:RemoveItem(who, what, count)
+        return success == true
     end
-    local xPlayer = ESX.GetPlayerFromId(who)
-    if xPlayer == nil then
-        log("TakeItem: Failed to resolve xPlayer from", who)
-        return false
+    if Framework.inventory ~= 'framework' then
+        return true
     end
-    local itemspec =  xPlayer.getInventoryItem(what)
-    if itemspec then
-        if itemspec.count >= count then
+    if Framework.name == 'esx' and Framework.core then
+        local xPlayer = Framework.core.GetPlayerFromId(who)
+        if not xPlayer then return false end
+        local itemspec = xPlayer.getInventoryItem(what)
+        if itemspec and itemspec.count >= count then
             xPlayer.removeInventoryItem(what, count)
             return true
-        else
-            return false
         end
-    else
-        log("TakeItem: Failed to get item data for item", what)
         return false
     end
+    if Framework.name == 'qb' and Framework.core then
+        local Player = Framework.core.Functions.GetPlayer(who)
+        if not Player then return false end
+        local item = Player.Functions.GetItemByName(what)
+        local amount = item and (item.amount or item.count or 0) or 0
+        if amount >= count then
+            return Player.Functions.RemoveItem(what, count) == true
+        end
+        return false
+    end
+    return false
 end
 
 function GiveItem(who, what, count)
     count = count or 1
-    if ESX == nil then
-        log("GiveItem: No ESX Object!")
+    if not what then return true end
+    if Framework.inventory == 'ox' and Framework.ox then
+        if Framework.ox:CanCarryItem(who, what, count) then
+            local success = Framework.ox:AddItem(who, what, count)
+            return success == true
+        end
         return false
     end
-    local xPlayer = ESX.GetPlayerFromId(who)
-    if xPlayer == nil then
-        log("GiveItem: Failed to resolve xPlayer from", who)
-        return false
+    if Framework.inventory ~= 'framework' then
+        return true
     end
-    -- ESX Legacy / modern inventory: prefer canCarryItem when available.
-    if xPlayer.canCarryItem and not xPlayer.canCarryItem(what, count) then
-        return false
-    end
-
-    -- Backwards-compatible fallback for very old inventories.
-    local itemspec = xPlayer.getInventoryItem(what)
-    if not itemspec then
-        log("GiveItem: Failed to get item data for item", what)
-        return false
-    end
-
-    if (not xPlayer.canCarryItem) then
-        if itemspec.limit and itemspec.limit ~= -1 and (itemspec.count + count) > itemspec.limit then
+    if Framework.name == 'esx' and Framework.core then
+        local xPlayer = Framework.core.GetPlayerFromId(who)
+        if not xPlayer then return false end
+        if xPlayer.canCarryItem and not xPlayer.canCarryItem(what, count) then
             return false
         end
+        local itemspec = xPlayer.getInventoryItem(what)
+        if not itemspec then return false end
+        if (not xPlayer.canCarryItem) then
+            if itemspec.limit and itemspec.limit ~= -1 and (itemspec.count + count) > itemspec.limit then
+                return false
+            end
+        end
+        xPlayer.addInventoryItem(what, count)
+        return true
     end
-
-    xPlayer.addInventoryItem(what, count)
-    return true
+    if Framework.name == 'qb' and Framework.core then
+        local Player = Framework.core.Functions.GetPlayer(who)
+        if not Player then return false end
+        return Player.Functions.AddItem(what, count) == true
+    end
+    return false
 end
 
+-- Framework init (must run after log() exists)
+Citizen.CreateThread(function()
+    -- Wait for config + shared libs to load
+    Citizen.Wait(0)
+    initFramework()
+end)
+
 function makeToast(target, subject, message)
-    TriggerClientEvent('esx_uteknark:make_toast', target, subject, message)
+    TriggerClientEvent('mosh_uteknark:make_toast', target, subject, message)
 end
 function inChat(target, message)
     if target == 0 then
@@ -149,11 +258,11 @@ end
 
 function doScenario(who, what, where)
     verbose('Telling', who,'to',what,'at',where)
-    TriggerClientEvent('esx_uteknark:do', who, what, where)
+    TriggerClientEvent('mosh_uteknark:do', who, what, where)
 end
 
-RegisterNetEvent('esx_uteknark:success_plant')
-AddEventHandler ('esx_uteknark:success_plant', function(location, soil)
+RegisterNetEvent('mosh_uteknark:success_plant')
+AddEventHandler ('mosh_uteknark:success_plant', function(location, soil)
     local src = source
     if oneSyncEnabled and false then -- "and false" because something is weird in my OneSync stuff
         local ped = GetPlayerPed(src)
@@ -192,18 +301,18 @@ AddEventHandler ('esx_uteknark:success_plant', function(location, soil)
     end
 end)
 
-RegisterNetEvent('esx_uteknark:log')
-AddEventHandler ('esx_uteknark:log',function(...)
+RegisterNetEvent('mosh_uteknark:log')
+AddEventHandler ('mosh_uteknark:log',function(...)
     local src = source
     log(src,GetPlayerName(src),...)
 end)
 
-RegisterNetEvent('esx_uteknark:test_forest')
-AddEventHandler ('esx_uteknark:test_forest',function(forest)
+RegisterNetEvent('mosh_uteknark:test_forest')
+AddEventHandler ('mosh_uteknark:test_forest',function(forest)
     local src = source
 
 
-    if IsPlayerAceAllowed(src, 'command.uteknark') then
+    if IsPlayerAceAllowed(src, 'command.mosh_uteknark') or IsPlayerAceAllowed(src, 'command.uteknark') then
 
         local soil
         for candidate, quality in pairs(Config.Soil) do
@@ -225,53 +334,68 @@ AddEventHandler ('esx_uteknark:test_forest',function(forest)
     end
 end)
 
-function keyCount(tbl)
-    local count = 0
-    if type(tbl) == 'table' then
-        for key, value in pairs(tbl) do
-            count = count + 1
-        end
-    end
-    return count
-end
-
-Citizen.CreateThread(function()
-    local tries = 60
-    while (not ESX or not ESX.Items or keyCount(ESX.Items) == 0) and tries > 0 do
-        Citizen.Wait(1000)
-        tries = tries - 1
-    end
-
-    if not ESX then
-        log("CRITICAL ERROR: Could not obtain ESX object!\n")
+local function useSeed(source)
+    local now = os.time()
+    local last = lastPlant[source] or 0
+    if now <= last + (Config.ActionTime / 1000) then
+        makeToast(source, _U('planting_text'), _U('planting_too_fast'))
         return
     end
 
-    -- Validate configured items
-    if ESX.Items then
+    if Config.Items.Seed and HasItem(source, Config.Items.Seed) then
+        TriggerClientEvent('mosh_uteknark:attempt_plant', source)
+        lastPlant[source] = now
+    else
+        makeToast(source, _U('planting_text'), _U('planting_no_seed'))
+    end
+end
+
+Citizen.CreateThread(function()
+    -- Wait until framework detection ran
+    while not Framework.ready do
+        Citizen.Wait(0)
+    end
+
+    -- Optional validation of configured items
+    local itemList
+    if Framework.name == 'esx' and Framework.core and Framework.core.Items then
+        itemList = Framework.core.Items
+    elseif Framework.name == 'qb' and Framework.core and Framework.core.Shared and Framework.core.Shared.Items then
+        itemList = Framework.core.Shared.Items
+    end
+    if type(itemList) == 'table' then
         for forWhat, itemName in pairs(Config.Items) do
-            if ESX.Items[itemName] then
-                log(forWhat, 'item in configuration ('..itemName..') found in ESX: Good!')
-            else
+            if itemName and itemList[itemName] then
+                log(forWhat, 'item in configuration ('..itemName..') found: Good!')
+            elseif itemName then
                 log('WARNING:', forWhat, 'item in configuration ('..itemName..') does not exist!')
             end
         end
     end
 
-    ESX.RegisterUsableItem(Config.Items.Seed, function(source)
-        local now = os.time()
-        local last = lastPlant[source] or 0
-        if now > last + (Config.ActionTime / 1000) then
-            if HasItem(source, Config.Items.Seed) then
-                TriggerClientEvent('esx_uteknark:attempt_plant', source)
-                lastPlant[source] = now
-            else
-                makeToast(source, _U('planting_text'), _U('planting_no_seed'))
-            end
-        else
-            makeToast(source, _U('planting_text'), _U('planting_too_fast'))
-        end
-    end)
+    -- Register seed usage depending on framework
+    if not Config.Items.Seed then
+        log('WARNING: Config.Items.Seed is nil; players will not be able to plant.')
+        return
+    end
+
+    if Framework.name == 'esx' and Framework.core then
+        Framework.core.RegisterUsableItem(Config.Items.Seed, function(source)
+            useSeed(source)
+        end)
+    elseif Framework.name == 'qb' and Framework.core then
+        -- QBCore: CreateUseableItem(item, cb)
+        Framework.core.Functions.CreateUseableItem(Config.Items.Seed, function(source, item)
+            useSeed(source)
+        end)
+    else
+        -- Standalone: command-based fallback
+        local cmd = (Config.Standalone and Config.Standalone.PlantCommand) or 'utekseed'
+        RegisterCommand(cmd, function(source)
+            useSeed(source)
+        end, false)
+        log('Standalone mode: use /'..cmd..' to plant a seed.')
+    end
 end)
 
 Citizen.CreateThread(function()
@@ -281,9 +405,9 @@ Citizen.CreateThread(function()
     MySQL.ready(function()
         cropstate:load(function(plantCount)
             if plantCount == 1 then
-                log('Uteknark loaded a single plant!')
+                log('mosh_uteknark loaded a single plant!')
             else
-                log('Uteknark loaded',plantCount,'plants')
+                log('mosh_uteknark loaded',plantCount,'plants')
             end
         end)
         databaseReady = true
@@ -344,7 +468,7 @@ local commands = {
         if source == 0 then
             log('Client debugging on the console? Nope.')
         else
-            TriggerClientEvent('esx_uteknark:toggle_debug', source)
+            TriggerClientEvent('mosh_uteknark:toggle_debug', source)
         end
     end,
     stage = function(source, args)
@@ -382,7 +506,7 @@ local commands = {
             local randomStage = false
             if args[2] then randomStage = true end
 
-            TriggerClientEvent('esx_uteknark:test_forest', source, count, randomStage)
+            TriggerClientEvent('mosh_uteknark:test_forest', source, count, randomStage)
 
         end
     end,
@@ -403,19 +527,19 @@ local commands = {
         if source == 0 then
             log('Console. The ground material is CONSOLE.')
         else
-            TriggerClientEvent('esx_uteknark:groundmat', source)
+            TriggerClientEvent('mosh_uteknark:groundmat', source)
         end
     end,
     pyro = function(source, args)
         if source == 0 then
             log('You can\'t really test particle effects on the console.')
         else
-            TriggerClientEvent('esx_uteknark:pyromaniac', source)
+            TriggerClientEvent('mosh_uteknark:pyromaniac', source)
         end
     end,
 }
 
-RegisterCommand('uteknark', function(source, args, raw)
+local function adminCommandHandler(source, args, raw)
     if #args > 0 then
         local directive = string.lower(args[1])
         if commands[directive] then
@@ -439,4 +563,9 @@ RegisterCommand('uteknark', function(source, args, raw)
     else
         inChat(source, _U('command_empty', VERSION))
     end
-end,true)
+end
+
+-- Admin command (new name)
+RegisterCommand('mosh_uteknark', adminCommandHandler, true)
+-- Legacy alias (old name)
+RegisterCommand('uteknark', adminCommandHandler, true)
